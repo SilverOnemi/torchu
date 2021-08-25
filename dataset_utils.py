@@ -65,12 +65,16 @@ class AlbumentationsAutoAugment(transforms.autoaugment.AutoAugment):
 
         return {'image': image}
 
+    def _to_dict(self):
+        return {'__class__fullname__': 'AlbumentationsAutoAugment', 'policy': self.policy}
+
 
 # from https://github.com/pytorch/vision/blob/master/references/classification/presets.py
 class ClassificationPresetTrain:
     def __init__(self, crop_size, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), hflip_prob=0.5,
                  auto_augment_policy=None, random_erase_prob=0.0, use_albumentations=True):
         self.use_albumentations = use_albumentations
+
         if use_albumentations:
             trans = [A.RandomResizedCrop(crop_size, crop_size)]
             if hflip_prob > 0:
@@ -114,6 +118,7 @@ class ClassificationPresetEval:
     def __init__(self, crop_size, resize_size=256, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225),
                  use_albumentations=True):
         self.use_albumentations = use_albumentations
+
         if use_albumentations:
             self.transforms = A.Compose([
                 A.Resize(resize_size, resize_size),

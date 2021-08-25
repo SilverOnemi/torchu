@@ -4,12 +4,14 @@ import torch
 import tabulate as tb
 import plot_utils
 import numpy as np
+import albumentations as A
+import wandb
 
 
 class MetricLogger(object):
     def __init__(self, user_header=['train_acc', 'test_acc', 'train_loss', 'test_loss'],
                  lr_scheduler=None,
-                 console_live_log=True, live_plot=['train_acc', 'test_acc']):
+                 wandb=None, console_live_log=True, live_plot=['train_acc', 'test_acc']):
         self.console_live_log = console_live_log  # false if log is printed only at the end
         self.live_plot = live_plot  # true if drawing a live plot every epoch
         self.live_plot_data = None  # data for the live plot
@@ -26,6 +28,7 @@ class MetricLogger(object):
         self.user_data = None  # the data of the current iteration provided by update(...)
         self.total_time = 0  # how long the total training took
         self.total_mem = 0  # total memory used
+        self.wandb = wandb
 
     def print_report(self):
         format_table(self.table, header=self.header, separators=False)
@@ -58,6 +61,8 @@ class MetricLogger(object):
             # save the current learning rate before it is updated
             if self.lr_scheduler is not None:
                 last_lr = self.lr_scheduler.get_last_lr()[0]
+            else:
+                last_lr = None
 
             # run and benchmark the execution
             estart_time = time.time()
@@ -85,14 +90,75 @@ class MetricLogger(object):
             if self.live_plot is not None:
                 animator.add(self.epoch - 1, self.live_plot_data)
 
+            # log to wandb
+            if self.wandb is not None:
+                self.wandb.log_epoch(self.user_header, self.user_data, last_lr)
+
         # benchmark over, track execution stats and print to console if requested
         self.total_time = time.time() - start
         self.total_mem = int(torch.cuda.max_memory_allocated() / (1024.0 * 1024.0))
         if self.console_live_log:
             print('\r', end='')
 
-    def report(self, best_epoch, best_acc):  # todo create another object which will contain this data
+    def report(self, best_epoch, best_acc):
+        if self.wandb is not None:
+            self.wandb.training_end(best_epoch, best_acc)
         return MetricReport(self.header, self.table, best_epoch, best_acc, self.total_time, self.total_mem, self.epoch)
+
+
+class WandbMetricLogger:
+    def __init__(self, args, entity='silverone', log_gradients=False):
+        if isinstance(args, list):
+            self.wandb = wandb.init(args[0], name=args[1], entity=entity)
+        elif isinstance(args, dict):
+            if 'entity' not in args.keys():
+                args['entity'] = entity
+            self.wandb = wandb.init(**args)
+        else:
+            self.wandb = wandb.init(project=args, entity=entity)
+        self.log_gradients = log_gradients
+
+    def set_metrics(self, accuracy_metrics=None):
+        if accuracy_metrics is not None:
+            for m in accuracy_metrics:
+                wandb.define_metric(m, summary="max")
+
+    def training_start(self, model, train_dt, test_dt, epochs,
+                       criterion, optimizer, lr_scheduler, ema_decay):
+
+        wandb.config.model = model.__class__.__name__
+        if self.log_gradients:
+            wandb.watch(model)
+
+        wandb.config.train_transforms = A.to_dict(train_dt.dataset.transforms.transforms)
+        if test_dt is not None:
+            wandb.config.test_transforms = A.to_dict(test_dt.dataset.transforms.transforms)
+
+        wandb.config.epochs = epochs
+        wandb.config.criterion = criterion.__class__.__name__
+        wandb.config.optimizer = {'name': optimizer.__class__.__name__, 'params': optimizer.defaults}
+        if lr_scheduler is not None:
+            wandb.config.lr_scheduler = {'name': lr_scheduler.__class__.__name__, 'params': {
+                key: lr_scheduler.__dict__[key] for key in
+                lr_scheduler.__dict__.keys() and ['step_size', 'gamma']
+            }}
+        wandb.config.ema_decay = ema_decay
+
+    def training_end(self, best_epoch, best_acc):
+        self.wandb.summary['best_epoch'] = best_epoch
+        self.wandb.summary['best_accuracy'] = best_acc
+        self.wandb.finish()
+
+    @staticmethod
+    def log_epoch(header, row, last_lr):
+        run = {}
+        for i in range(len(header)):
+            run[header[i]] = row[i]
+
+        if last_lr is not None:
+            run['lr'] = last_lr
+
+        wandb.log(run)
 
 
 class MetricReport:
@@ -107,6 +173,9 @@ class MetricReport:
 
     def print(self):
         format_table(self.table, header=self.header, separators=False)
+        self.brief()
+
+    def brief(self):
         print(f"\nBest acc: {self.best_acc:3.2f}% @ epoch {self.best_epoch}")
         print(f"Total time: {str(datetime.timedelta(seconds=int(self.total_time)))}")
         print(f"Time per iteration: {str(datetime.timedelta(seconds=int(self.total_time / self.epochs)))}")

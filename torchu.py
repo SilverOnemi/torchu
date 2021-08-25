@@ -1,4 +1,6 @@
 import copy
+
+import log_utils
 from log_utils import MetricLogger
 
 import torch
@@ -13,11 +15,14 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 # todo how we can improve metriclogger and feedback during training:
-#  https://albumentations.ai/docs/examples/pytorch_classification/ it has a really nice progress bar todo multi-line
-#   carriage return for log_utils: https://stackoverflow.com/questions/39455022/python-3-print-update-on-multiple
-#   -lines this would allow us to give much better output during training.
+#  https://albumentations.ai/docs/examples/pytorch_classification/ it has a really nice progress bar  multi-line
+#  carriage return for log_utils: https://stackoverflow.com/questions/39455022/python-3-print-update-on-multiple
+#  -lines this would allow us to give much better output during training.
 
 # todo add arg channels_last see https://github.com/rwightman/pytorch-image-models/blob/master/train.py
+
+# todo automatically create acc/loss charts for both test/train in wandb
+#  https://docs.wandb.ai/guides/data-vis/log-tables
 
 
 def get_dataloaders(train, test, batch_size=128, num_workers=0, cuda_stream_preload=True):
@@ -93,7 +98,8 @@ def test_model(model, testloader: DataLoader, acc_fn=None, criterion=None, resul
             if result_bag:
                 results.append(output)
 
-    results = torch.cat(results)
+    if result_bag:
+        results = torch.cat(results)
 
     running_acc /= len(testloader)
     assert (running_acc <= 1)
@@ -106,8 +112,8 @@ def test_model(model, testloader: DataLoader, acc_fn=None, criterion=None, resul
 
 def train_test_model(model, train_dt, test_dt=None, acc_fn=None, epochs=90,
                      loss=None, optimizer=None, lr_scheduler=None, ema_decay=0.0,
-                     use_amp=True,
-                     check_point=None, live_plot=True, print_report=True):
+                     use_amp=True, check_point=None,
+                     wandb=None, live_plot=True, live_log=True, print_report=False):
     # initialize metric logger which will report stats to terminal and draw a plot
     if test_dt is not None:
         user_header = ['train_acc', 'test_acc', 'train_loss', 'test_loss']
@@ -116,10 +122,18 @@ def train_test_model(model, train_dt, test_dt=None, acc_fn=None, epochs=90,
         user_header = ['train_acc', 'train_loss']
         live_plot_header = ['train_acc']
 
+    if wandb is not None and not isinstance(wandb, log_utils.WandbMetricLogger):
+        wandb = log_utils.WandbMetricLogger(wandb)
+        wandb.set_metrics(live_plot_header)
+        wandb.training_start(model, train_dt, test_dt, epochs,
+                             loss, optimizer, lr_scheduler, ema_decay)
+
     metric_logger = MetricLogger(
         user_header=user_header,
         live_plot=live_plot_header if live_plot else None,
-        lr_scheduler=lr_scheduler
+        lr_scheduler=lr_scheduler,
+        console_live_log=live_log,
+        wandb=wandb
     )
 
     # initialize training variables
@@ -174,6 +188,9 @@ def train_test_model(model, train_dt, test_dt=None, acc_fn=None, epochs=90,
     report = metric_logger.report(best_epoch, best_acc)
     if print_report:
         report.print()
+    elif live_plot:
+      report.brief()
+
     return report
 
 
@@ -300,6 +317,8 @@ def create_std_model(name='resnet50', output_features=None, scale_output_feature
 
     else:
         raise Exception("Unknown model name: " + name)
+
+    model.to(device)
 
     return model
 
