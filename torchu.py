@@ -87,10 +87,11 @@ def test_model(model, testloader: DataLoader, acc_fn=None, criterion=None, resul
 
     with torch.no_grad():
         for data in testloader:
-            inputs, labels = data[0].to(device=device), data[1].to(device=device)
+            inputs =data[0].to(device=device)
             output = model(inputs)
 
             if criterion is not None:
+                labels = data[1].to(device=device)
                 loss = criterion(output, labels)
                 running_loss += loss.item()
                 if acc_fn is not None:
