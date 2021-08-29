@@ -170,10 +170,10 @@ def train_test_model(model, train_dt, test_dt=None, acc_fn=None, epochs=90,
             eval_acc = train_acc
             metric_logger.update(train_acc=train_acc, train_loss=train_loss)
 
-        if eval_acc > best_acc:
+        if eval_acc >= best_acc:
             best_acc = eval_acc
             best_epoch = epoch
-            best = copy.deepcopy(model.state_dict())
+            best = model.state_dict()
             # torch.save(model, 'models/tmp.pt')
 
         if check_point is not None and epoch % 10:
