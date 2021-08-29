@@ -214,8 +214,6 @@ def train_test_model(model, train_dt, test_dt=None, acc_fn=None, epochs=90,
 
 def infer_model(model, test_dt):
     _, _, labels, result = test_model(model, test_dt, result_bag=True)
-    labels = labels.cpu()
-    result = result.cpu()
     return labels, result
 
 
