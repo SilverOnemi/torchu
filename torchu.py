@@ -176,6 +176,9 @@ def train_test_model(model, train_dt, test_dt=None, acc_fn=None, epochs=90,
             best = model.state_dict()
             # torch.save(model, 'models/tmp.pt')
 
+        labels, results = torchu.infer_model(model, test_dt)
+        print("TORCHU LOOP ACC: " + torchu.classification_accuracy_fn(results, labels))
+
         if check_point is not None and epoch % 10:
             checkpoint = {
                 'model': model.state_dict(),
@@ -186,14 +189,23 @@ def train_test_model(model, train_dt, test_dt=None, acc_fn=None, epochs=90,
             }
             torch.save(checkpoint, check_point)
 
+    labels, results = torchu.infer_model(model, test_dt)
+    print("TORCHU ACC: " + torchu.classification_accuracy_fn(results, labels))
+
     if best is not None:
         model.load_state_dict(best)
+
+    labels, results = torchu.infer_model(model, test_dt)
+    print("TORCHU ACC2: " + torchu.classification_accuracy_fn(results, labels))
 
     report = metric_logger.report(best_epoch, best_acc)
     if print_report:
         report.print()
     elif live_plot:
       report.brief()
+
+    labels, results = torchu.infer_model(model, test_dt)
+    print("TORCHU ACC3: " + torchu.classification_accuracy_fn(results, labels))
 
     return report
 
