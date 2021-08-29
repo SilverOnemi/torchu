@@ -83,8 +83,8 @@ def test_model(model, testloader: DataLoader, acc_fn=None, criterion=None, resul
     running_acc = 0.0
 
     if result_bag:
-        results = []
-        labels = []
+        results_bag = []
+        labels_bag = []
 
     with torch.no_grad():
         for data in testloader:
@@ -98,18 +98,18 @@ def test_model(model, testloader: DataLoader, acc_fn=None, criterion=None, resul
                 if acc_fn is not None:
                     running_acc += acc_fn(output, labels)
             if result_bag:
-                results.append(output)
-                labels.append(data[1])
+                results_bag.append(output)
+                labels_bag.append(data[1])
 
     if result_bag:
-        results = torch.cat(results)
-        labels = torch.cat(labels)
+        results_bag = torch.cat(results_bag)
+        labels_bag = torch.cat(labels_bag)
 
     running_acc /= len(testloader)
     assert (running_acc <= 1)
     running_loss /= len(testloader)
     if result_bag:
-        return running_acc * 100, running_loss, labels, results
+        return running_acc * 100, running_loss , labels_bag, results_bag
     else:
         return running_acc * 100, running_loss
 
@@ -166,6 +166,8 @@ def train_test_model(model, train_dt, test_dt=None, acc_fn=None, epochs=90,
             test_acc, test_loss = test_model(model, test_dt, acc_fn, loss)
             eval_acc = test_acc
             metric_logger.update(train_acc=train_acc, test_acc=test_acc, train_loss=train_loss, test_loss=test_loss)
+            labels, results = infer_model(model, test_dt)
+            print(f"TORCHU LOOP ACC1: {classification_accuracy_fn(results, labels)}")
         else:
             eval_acc = train_acc
             metric_logger.update(train_acc=train_acc, train_loss=train_loss)
@@ -177,7 +179,7 @@ def train_test_model(model, train_dt, test_dt=None, acc_fn=None, epochs=90,
             # torch.save(model, 'models/tmp.pt')
 
         labels, results = infer_model(model, test_dt)
-        print(f"TORCHU LOOP ACC: {classification_accuracy_fn(results, labels)}")
+        print(f"TORCHU LOOP ACC2: {classification_accuracy_fn(results, labels)}")
 
         if check_point is not None and epoch % 10:
             checkpoint = {
