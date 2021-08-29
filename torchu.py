@@ -84,6 +84,7 @@ def test_model(model, testloader: DataLoader, acc_fn=None, criterion=None, resul
 
     if result_bag:
         results = []
+        labels = []
 
     with torch.no_grad():
         for data in testloader:
@@ -98,15 +99,17 @@ def test_model(model, testloader: DataLoader, acc_fn=None, criterion=None, resul
                     running_acc += acc_fn(output, labels)
             if result_bag:
                 results.append(output)
+                labels.append(data[1])
 
     if result_bag:
         results = torch.cat(results)
+        labels = torch.cat(labels)
 
     running_acc /= len(testloader)
     assert (running_acc <= 1)
     running_loss /= len(testloader)
     if result_bag:
-        return running_acc * 100, running_loss, results
+        return running_acc * 100, running_loss, labels, results
     else:
         return running_acc * 100, running_loss
 
@@ -196,9 +199,10 @@ def train_test_model(model, train_dt, test_dt=None, acc_fn=None, epochs=90,
 
 
 def infer_model(model, test_dt):
-    _, _, result = test_model(model, test_dt, result_bag=True)
+    _, _, labels, result = test_model(model, test_dt, result_bag=True)
+    labels = labels.cpu()
     result = result.cpu()
-    return result
+    return labels, result
 
 
 def train_infer_model(model, train_dt, test_dt, acc_fn=None, epochs=90,
