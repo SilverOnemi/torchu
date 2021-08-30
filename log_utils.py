@@ -5,8 +5,11 @@ import tabulate as tb
 import plot_utils
 import numpy as np
 import albumentations as A
-import wandb
 
+try:
+    import wandb
+except ImportError:
+    pass
 
 class MetricLogger(object):
     def __init__(self, user_header=['train_acc', 'test_acc', 'train_loss', 'test_loss'],

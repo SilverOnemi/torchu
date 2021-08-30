@@ -1,14 +1,16 @@
-import copy
-
-import log_utils
-from log_utils import MetricLogger
-
 import torch
-import timm
 from torch import nn
 from torch.utils.data import DataLoader
-import dataset_utils
 import torchvision
+
+try:
+    import timm
+except ImportError:
+    pass
+
+import dataset_utils
+import log_utils
+from log_utils import MetricLogger
 
 torch.backends.cudnn.benchmark = True
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -77,18 +79,14 @@ def train_model_epoch(model, trainloader: DataLoader, acc_fn, criterion, optimiz
     return running_acc * 100, running_loss
 
 
-def test_model(model, testloader: DataLoader, acc_fn=None, criterion=None, result_bag=False):
+def test_model(model, testloader: DataLoader, acc_fn=None, criterion=None):
     model.eval()
     running_loss = 0.0
     running_acc = 0.0
 
-    if result_bag:
-        results_bag = []
-        labels_bag = []
-
     with torch.no_grad():
         for data in testloader:
-            inputs =data[0].to(device=device)
+            inputs = data[0].to(device=device)
             output = model(inputs)
 
             if criterion is not None:
@@ -97,21 +95,12 @@ def test_model(model, testloader: DataLoader, acc_fn=None, criterion=None, resul
                 running_loss += loss.item()
                 if acc_fn is not None:
                     running_acc += acc_fn(output, labels)
-            if result_bag:
-                results_bag.append(output)
-                labels_bag.append(data[1])
-
-    if result_bag:
-        results_bag = torch.cat(results_bag)
-        labels_bag = torch.cat(labels_bag)
 
     running_acc /= len(testloader)
     assert (running_acc <= 1)
     running_loss /= len(testloader)
-    if result_bag:
-        return running_acc * 100, running_loss , labels_bag, results_bag
-    else:
-        return running_acc * 100, running_loss
+
+    return running_acc * 100, running_loss
 
 
 def train_test_model(model, train_dt, test_dt=None, acc_fn=None, epochs=90,
@@ -193,27 +182,9 @@ def train_test_model(model, train_dt, test_dt=None, acc_fn=None, epochs=90,
     if print_report:
         report.print()
     elif live_plot:
-      report.brief()
+        report.brief()
 
     return report
-
-
-def infer_model(model, test_dt):
-    _, _, labels, result = test_model(model, test_dt, result_bag=True)
-    labels = labels.cpu()
-    result = result.cpu()
-    return labels, result
-
-
-def train_infer_model(model, train_dt, test_dt, acc_fn=None, epochs=90,
-                      loss=None, optimizer=None, lr_scheduler=None,
-                      use_amp=True, check_point=None, live_plot=True, print_report=True):
-    train_report = train_test_model(model, train_dt, test_dt=None, acc_fn=acc_fn, epochs=epochs,
-                                    loss=loss, optimizer=optimizer, lr_scheduler=lr_scheduler, use_amp=use_amp,
-                                    check_point=check_point, live_plot=live_plot, print_report=print_report)
-
-    result_bag = infer_model(model, test_dt)
-    return train_report, result_bag
 
 
 ## Define accuracy functions
