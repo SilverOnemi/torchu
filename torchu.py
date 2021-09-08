@@ -3,6 +3,9 @@ from torch import nn
 from torch.utils.data import DataLoader
 import torchvision
 
+import numpy as np
+import random
+
 try:
     import timm
 except ImportError:
@@ -16,6 +19,8 @@ torch.backends.cudnn.benchmark = True
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
+# todo add seed function
+
 # todo how we can improve metriclogger and feedback during training:
 #  https://albumentations.ai/docs/examples/pytorch_classification/ it has a really nice progress bar  multi-line
 #  carriage return for log_utils: https://stackoverflow.com/questions/39455022/python-3-print-update-on-multiple
@@ -26,12 +31,11 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 # todo automatically create acc/loss charts for both test/train in wandb
 #  https://docs.wandb.ai/guides/data-vis/log-tables
 
-
 def get_dataloaders(train, test, batch_size=128, num_workers=0, cuda_stream_preload=True):
     train_dt = DataLoader(train, batch_size=batch_size, shuffle=True,
-                          num_workers=num_workers, pin_memory=True)
+                          num_workers=num_workers, persistent_workers=True, pin_memory=True)
     test_dt = DataLoader(test, batch_size=batch_size, shuffle=False,
-                         num_workers=num_workers, pin_memory=True)
+                         num_workers=num_workers, persistent_workers=True, pin_memory=True)
 
     if cuda_stream_preload:  # ~2% performance increase
         train_dt = dataset_utils.CudaPrefetchLoader(train_dt, device=device)
@@ -79,7 +83,7 @@ def train_model_epoch(model, trainloader: DataLoader, acc_fn, criterion, optimiz
     return running_acc * 100, running_loss
 
 
-def test_model(model, testloader: DataLoader, acc_fn=None, criterion=None):
+def test_model(model, testloader: DataLoader, acc_fn=None, criterion=None, scaler=None):
     model.eval()
     running_loss = 0.0
     running_acc = 0.0
@@ -87,14 +91,18 @@ def test_model(model, testloader: DataLoader, acc_fn=None, criterion=None):
     with torch.no_grad():
         for data in testloader:
             inputs = data[0].to(device=device)
-            output = model(inputs)
-
             if criterion is not None:
                 labels = data[1].to(device=device)
-                loss = criterion(output, labels)
+
+            with torch.cuda.amp.autocast(enabled=scaler.is_enabled()):
+                output = model(inputs)
+                if criterion is not None:
+                    loss = criterion(output, labels)
+
+            if criterion is not None:
                 running_loss += loss.item()
-                if acc_fn is not None:
-                    running_acc += acc_fn(output, labels)
+            if acc_fn is not None:
+                running_acc += acc_fn(output, labels)
 
     running_acc /= len(testloader)
     assert (running_acc <= 1)
@@ -124,7 +132,7 @@ def train_test_model(model, train_dt, test_dt=None, acc_fn=None, epochs=90,
     metric_logger = MetricLogger(
         user_header=user_header,
         live_plot=live_plot_header if live_plot else None,
-        lr_scheduler=lr_scheduler,
+        optimizer=optimizer,
         console_live_log=live_log,
         wandb=wandb
     )
@@ -142,22 +150,36 @@ def train_test_model(model, train_dt, test_dt=None, acc_fn=None, epochs=90,
     best_epoch = -1
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
     torch.cuda.empty_cache()  # maybe required to prevent memory leaks in notebook
+    try:
+        timm_lr_scheduler = isinstance(lr_scheduler, timm.scheduler.scheduler.Scheduler)
+    except (ImportError, AttributeError):
+        timm_lr_scheduler = False
+        pass
 
     # run the training loop
     for epoch in metric_logger.log(range(epochs)):
         train_acc, train_loss = train_model_epoch(model, train_dt, acc_fn,
                                                   loss, optimizer, scaler,
                                                   ema_model)
-        # decay learning rate
-        if lr_scheduler is not None: lr_scheduler.step()
 
         if test_dt is not None:
-            test_acc, test_loss = test_model(model, test_dt, acc_fn, loss)
+            test_acc, test_loss = test_model(model, test_dt, acc_fn, loss, scaler)
             eval_acc = test_acc
+            eval_loss = test_loss
             metric_logger.update(train_acc=train_acc, test_acc=test_acc, train_loss=train_loss, test_loss=test_loss)
         else:
             eval_acc = train_acc
+            eval_loss = train_loss
             metric_logger.update(train_acc=train_acc, train_loss=train_loss)
+
+        # decay learning rate
+        if lr_scheduler is not None:
+            if isinstance(lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                lr_scheduler.step(eval_loss)
+            elif timm_lr_scheduler:
+                lr_scheduler.step(epoch, eval_acc)
+            else:
+                lr_scheduler.step()
 
         if eval_acc >= best_acc:
             best_acc = eval_acc
@@ -302,3 +324,10 @@ def create_std_model(name='resnet50', output_features=None, scale_output_feature
 def set_parameter_requires_grad(model, value):
     for param in model.parameters():
         param.requires_grad = value
+
+
+def set_seeds(seed=0xDEADBEEF):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    np.random.seed(seed=seed)
+    random.seed(seed)

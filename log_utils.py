@@ -11,20 +11,19 @@ try:
 except ImportError:
     pass
 
+
 class MetricLogger(object):
     def __init__(self, user_header=['train_acc', 'test_acc', 'train_loss', 'test_loss'],
-                 lr_scheduler=None,
+                 optimizer=None,
                  wandb=None, console_live_log=True, live_plot=['train_acc', 'test_acc']):
         self.console_live_log = console_live_log  # false if log is printed only at the end
         self.live_plot = live_plot  # true if drawing a live plot every epoch
         self.live_plot_data = None  # data for the live plot
-        self.lr_scheduler = lr_scheduler
+        self.optimizer = optimizer
         self.user_header = user_header  # the user provided header
         self.header = ['epoch']  # build the actual header which has extra info
         self.header.extend(user_header)
-        if lr_scheduler is not None:
-            self.header.append('lr')
-        self.header.extend(['runtime'])
+        self.header.extend(['lr', 'runtime'])
         self.table = []  # the table containing all info ordered by header
         self.epoch = 0  # the current epoch
         self.runtime = 0  # the current runtime
@@ -62,10 +61,8 @@ class MetricLogger(object):
         start = time.time()
         for obj in iterable:
             # save the current learning rate before it is updated
-            if self.lr_scheduler is not None:
-                last_lr = self.lr_scheduler.get_last_lr()[0]
-            else:
-                last_lr = None
+            last_lr = self.optimizer.param_groups[0]["lr"]
+            last_lr_fmt = "{:.2e}".format(last_lr)
 
             # run and benchmark the execution
             estart_time = time.time()
@@ -75,8 +72,7 @@ class MetricLogger(object):
             # produce the stats and append them to the table
             row = [self.epoch]
             row.extend(self.user_data)
-            if self.lr_scheduler is not None:
-                row.append(last_lr)
+            row.append(last_lr_fmt)
             self.epoch += 1
             self.runtime += runtime
             row.append(runtime)
@@ -143,7 +139,8 @@ class WandbMetricLogger:
         if lr_scheduler is not None:
             wandb.config.lr_scheduler = {'name': lr_scheduler.__class__.__name__, 'params': {
                 key: lr_scheduler.__dict__[key] for key in
-                lr_scheduler.__dict__.keys() and ['step_size', 'gamma']
+                lr_scheduler.__dict__.keys() if
+                key in ['step_size', 'gamma', 'T_max', 'eta_min', 'max_lr', 'steps_per_epoch']
             }}
         wandb.config.ema_decay = ema_decay
 
